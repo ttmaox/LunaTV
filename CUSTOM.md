@@ -15,10 +15,12 @@
 **文件**: `vercel.json`
 
 **修改内容**: 新增 `functions` 配置，为两个路由设置 `maxDuration`：
+
 - `src/app/api/search/ws/route.ts`: 30 秒
 - `src/app/api/cron/route.ts`: 60 秒
 
 **原因**:
+
 - **搜索路由**: SSE 流式搜索需要并发请求多个资源站并逐个返回结果，默认的 10 秒超时可能不够。设置 30 秒给予足够的搜索时间。
 - **Cron 路由**: 定时任务涉及刷新配置、直播源、以及遍历所有用户的播放记录和收藏，数据量大时耗时较长，设置 60 秒避免中途超时。
 
@@ -29,6 +31,7 @@
 **文件**: `src/app/api/search/ws/route.ts`
 
 **修改内容**: 新增模块级常量 `SEARCH_TIMEOUT_MS`，根据 `SERVER_TYPE` 环境变量动态选择超时值：
+
 - `SERVER_TYPE=serverless` 时：8 秒
 - 其他（Docker 等传统部署）：保持原始 20 秒
 
@@ -55,13 +58,13 @@
 
 **注意**: `SERVER_TYPE=serverless` 需要在部署平台的环境变量中手动设置（Vercel 已在 `vercel.json` 中预设，但可能不生效，需在 Dashboard 中手动添加）。其他 Serverless 平台（如 Netlify、Cloudflare 等）如需此行为，也应设置该环境变量。
 
-## 5. 管理面板配置读取绕过缓存（read-your-write 一致性）
+## 5. FluidSearch 默认值和管理面板显示修复
 
-**文件**: `src/lib/config.ts`、`src/app/api/admin/config/route.ts`
+**文件**: `src/lib/config.ts`、`src/app/admin/page.tsx`
 
 **修改内容**:
 
-1. `config.ts` 新增 `getConfigDirect()` 函数：Serverless 环境下直接从数据库读取配置并刷新内存缓存，跳过 TTL 检查；非 Serverless 环境下等同于 `getConfig()`；数据库读取失败时降级到 `getConfig()`
-2. `admin/config/route.ts` 的 GET 接口从 `getConfig()` 改为 `getConfigDirect()`
+1. `config.ts`：`FluidSearch` 初始默认值根据 `SERVER_TYPE` 区分——Serverless 环境默认 `false`，其他环境保持原逻辑（`NEXT_PUBLIC_FLUID_SEARCH !== 'false'`，即默认 `true`）
+2. `admin/page.tsx`：站点配置初始化中 `FluidSearch` 的回退运算符从 `||` 改为 `??`
 
-**原因**: 第 4 条的 30 秒 TTL 机制解决的是多实例间的"最终一致性"，但管理面板需要"read-your-write"一致性。管理员保存配置后，前端立即调用 `refreshConfig()` 重新请求 `/api/admin/config`，该请求可能被路由到另一个 Vercel 实例，而该实例的内存缓存仍在 30 秒 TTL 内，返回旧数据。`getConfigDirect()` 确保管理面板的每次读取都直接访问数据库，同时刷新当前实例的缓存，不影响普通用户请求的缓存性能。
+**原因**: 原代码 `FluidSearch: config.SiteConfig.FluidSearch || true` 存在逻辑错误——当值为 `false` 时，`false || true` 结果为 `true`，导致管理面板无论数据库中存储的是什么值，该项始终显示为开启。改用 `??`（nullish coalescing）后，仅在值为 `null` 或 `undefined` 时才取默认值，`false` 能被正确保留。Serverless 环境下默认关闭流式搜索，因为 SSE 长连接受 Function 执行时长限制。

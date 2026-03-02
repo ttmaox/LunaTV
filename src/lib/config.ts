@@ -222,7 +222,9 @@ async function getInitConfig(
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
-      FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
+      FluidSearch: isServerless
+        ? false
+        : process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
       EnableWebLive: false,
     },
     UserConfig: {
@@ -340,29 +342,6 @@ export async function getConfig(): Promise<AdminConfig> {
   cachedConfigTime = Date.now();
   db.saveAdminConfig(cachedConfig);
   return cachedConfig;
-}
-
-/**
- * Serverless 环境下绕过内存缓存，直接从数据库读取配置并刷新缓存。
- * 用于管理面板等需要 read-your-write 一致性的场景。
- * 非 Serverless 环境下等同于 getConfig()。
- */
-export async function getConfigDirect(): Promise<AdminConfig> {
-  if (!isServerless) {
-    return getConfig();
-  }
-  try {
-    const freshConfig = await db.getAdminConfig();
-    if (freshConfig) {
-      cachedConfig = configSelfCheck(freshConfig);
-      cachedConfigTime = Date.now();
-      return cachedConfig;
-    }
-  } catch (e) {
-    console.error('直接读取配置失败:', e);
-  }
-  // 数据库读取失败或返回空，降级到缓存读取
-  return getConfig();
 }
 
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
